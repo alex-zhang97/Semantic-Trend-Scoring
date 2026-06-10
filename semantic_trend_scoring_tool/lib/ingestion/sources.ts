@@ -13,6 +13,11 @@ export const SOURCE_FETCHERS: Record<IngestSourceId, SourceFetcher> = {
   gdelt: fetchGdeltSignals,
   news: fetchNewsSignals,
   wikipedia: fetchWikipediaSignals,
+  tiktok: fetchTikTokSignals,
+  twitter: fetchTwitterSignals,
+  wsj: fetchWsjSignals,
+  nyt: fetchNytSignals,
+  "washington-post": fetchWashingtonPostSignals,
 };
 
 async function fetchGoogleTrendsSignals(
@@ -227,6 +232,284 @@ async function fetchWikipediaSignals(
     }));
 }
 
+async function fetchTikTokSignals(
+  config: IngestionConfig,
+  options: { ingestedAt: string; limit: number },
+): Promise<RawSignalRecord[]> {
+  if (!config.tiktok.clientKey || !config.tiktok.clientSecret) {
+    throw new Error("Missing TikTok Research API environment variables.");
+  }
+
+  const accessToken = await getTikTokAccessToken(config);
+  const dateRange = getUtcDateRange(config.tiktok.lookbackDays);
+  const url = buildUrl(config.tiktok.queryEndpoint, {
+    fields: config.tiktok.fields.join(","),
+  });
+  const payload = await fetchJson<TikTokQueryResponse>(
+    url,
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        query: buildTikTokResearchQuery(config),
+        start_date: dateRange.startDate,
+        end_date: dateRange.endDate,
+        max_count: Math.min(Math.max(options.limit, 1), 100),
+        is_random: false,
+      }),
+    },
+    config.requestTimeoutMs,
+  );
+  const videos = payload.data?.videos ?? payload.videos ?? [];
+
+  return videos.slice(0, options.limit).map((video) => {
+    const title =
+      video.video_description?.trim() ||
+      (video.id ? `TikTok video ${video.id}` : "Untitled TikTok video");
+
+    return {
+      source: "tiktok",
+      timestamp: normalizeTikTokTimestamp(video.create_time) ?? options.ingestedAt,
+      ingestedAt: options.ingestedAt,
+      title,
+      content: video.video_description || undefined,
+      engagement: sumNumbers([
+        video.view_count,
+        video.like_count,
+        video.comment_count,
+        video.share_count,
+        video.favorites_count,
+      ]),
+      url:
+        video.username && video.id
+          ? `https://www.tiktok.com/@${video.username}/video/${video.id}`
+          : undefined,
+      metadata: {
+        id: video.id ?? null,
+        username: video.username ?? null,
+        regionCode: video.region_code ?? null,
+        views: video.view_count ?? null,
+        likes: video.like_count ?? null,
+        comments: video.comment_count ?? null,
+        shares: video.share_count ?? null,
+        hashtags: video.hashtag_names?.join(",") ?? null,
+      },
+      raw: video,
+    };
+  });
+}
+
+async function fetchTwitterSignals(
+  config: IngestionConfig,
+  options: { ingestedAt: string; limit: number },
+): Promise<RawSignalRecord[]> {
+  if (!config.twitter.bearerToken) {
+    throw new Error("Missing TWITTER_BEARER_TOKEN.");
+  }
+
+  const url = buildUrl(config.twitter.endpoint, {
+    query: config.twitter.query,
+    max_results: Math.min(Math.max(options.limit, 10), 100),
+    "tweet.fields":
+      "created_at,public_metrics,author_id,lang,possibly_sensitive,context_annotations,entities",
+    expansions: "author_id",
+  });
+  const payload = await fetchJson<TwitterRecentSearchResponse>(
+    url,
+    {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${config.twitter.bearerToken}`,
+      },
+    },
+    config.requestTimeoutMs,
+  );
+
+  return (payload.data ?? []).slice(0, options.limit).map((tweet) => ({
+    source: "twitter",
+    timestamp: normalizeDate(tweet.created_at) ?? options.ingestedAt,
+    ingestedAt: options.ingestedAt,
+    title: tweet.text,
+    content: tweet.text,
+    engagement: sumNumbers([
+      tweet.public_metrics?.retweet_count,
+      tweet.public_metrics?.reply_count,
+      tweet.public_metrics?.like_count,
+      tweet.public_metrics?.quote_count,
+      tweet.public_metrics?.bookmark_count,
+      tweet.public_metrics?.impression_count,
+    ]),
+    url: `https://twitter.com/i/web/status/${tweet.id}`,
+    metadata: {
+      id: tweet.id,
+      authorId: tweet.author_id ?? null,
+      language: tweet.lang ?? null,
+      possiblySensitive: tweet.possibly_sensitive ?? null,
+    },
+    raw: tweet,
+  }));
+}
+
+async function fetchWsjSignals(
+  config: IngestionConfig,
+  options: { ingestedAt: string; limit: number },
+): Promise<RawSignalRecord[]> {
+  if (config.wsj.apiUrl && config.wsj.apiKey) {
+    return fetchPublisherApiSignals({
+      source: "wsj",
+      provider: "Wall Street Journal",
+      apiUrl: config.wsj.apiUrl,
+      apiKey: config.wsj.apiKey,
+      userAgent: config.wsj.userAgent,
+      config,
+      options,
+    });
+  }
+
+  return fetchPublisherRssSignals({
+    source: "wsj",
+    provider: "Wall Street Journal",
+    rssUrls: config.wsj.rssUrls,
+    userAgent: config.wsj.userAgent,
+    config,
+    options,
+  });
+}
+
+async function fetchNytSignals(
+  config: IngestionConfig,
+  options: { ingestedAt: string; limit: number },
+): Promise<RawSignalRecord[]> {
+  if (!config.nyt.apiKey) {
+    throw new Error("Missing NYT_API_KEY.");
+  }
+
+  const url = buildUrl(
+    `${config.nyt.endpoint.replace(/\/$/, "")}/${config.nyt.section}.json`,
+    {
+      "api-key": config.nyt.apiKey,
+    },
+  );
+  const payload = await fetchJson<NytTopStoriesResponse>(
+    url,
+    { headers: { Accept: "application/json" } },
+    config.requestTimeoutMs,
+  );
+
+  return (payload.results ?? []).slice(0, options.limit).map((article) => ({
+    source: "nyt",
+    timestamp: normalizeDate(article.published_date) ?? options.ingestedAt,
+    ingestedAt: options.ingestedAt,
+    title: article.title,
+    content: article.abstract || undefined,
+    url: article.url,
+    metadata: {
+      section: article.section ?? null,
+      subsection: article.subsection ?? null,
+      byline: article.byline ?? null,
+      itemType: article.item_type ?? null,
+      updatedDate: article.updated_date ?? null,
+      materialTypeFacet: article.material_type_facet ?? null,
+    },
+    raw: article,
+  }));
+}
+
+async function fetchWashingtonPostSignals(
+  config: IngestionConfig,
+  options: { ingestedAt: string; limit: number },
+): Promise<RawSignalRecord[]> {
+  if (config.washingtonPost.apiUrl && config.washingtonPost.apiKey) {
+    return fetchPublisherApiSignals({
+      source: "washington-post",
+      provider: "Washington Post",
+      apiUrl: config.washingtonPost.apiUrl,
+      apiKey: config.washingtonPost.apiKey,
+      userAgent: config.washingtonPost.userAgent,
+      config,
+      options,
+    });
+  }
+
+  return fetchPublisherRssSignals({
+    source: "washington-post",
+    provider: "Washington Post",
+    rssUrls: config.washingtonPost.rssUrls,
+    userAgent: config.washingtonPost.userAgent,
+    config,
+    options,
+  });
+}
+
+async function fetchPublisherApiSignals(input: {
+  source: IngestSourceId;
+  provider: string;
+  apiUrl: string;
+  apiKey: string;
+  userAgent?: string;
+  config: IngestionConfig;
+  options: { ingestedAt: string; limit: number };
+}): Promise<RawSignalRecord[]> {
+  const url = buildUrl(input.apiUrl, {
+    limit: input.options.limit,
+    api_key: input.apiKey,
+  });
+  const payload = await fetchJson<unknown>(
+    url,
+    {
+      headers: buildPublisherHeaders(input.apiKey, input.userAgent),
+    },
+    input.config.requestTimeoutMs,
+  );
+
+  return normalizePublisherJson(
+    payload,
+    input.source,
+    input.provider,
+    input.options.ingestedAt,
+  ).slice(0, input.options.limit);
+}
+
+async function fetchPublisherRssSignals(input: {
+  source: IngestSourceId;
+  provider: string;
+  rssUrls: string[];
+  userAgent?: string;
+  config: IngestionConfig;
+  options: { ingestedAt: string; limit: number };
+}): Promise<RawSignalRecord[]> {
+  const feedResults = await Promise.all(
+    input.rssUrls.map(async (feedUrl) => {
+      const xml = await fetchText(
+        feedUrl,
+        {
+          headers: {
+            Accept: "application/rss+xml, application/xml, text/xml",
+            ...(input.userAgent ? { "User-Agent": input.userAgent } : {}),
+          },
+        },
+        input.config.requestTimeoutMs,
+      );
+
+      return parsePublisherFeedXml(
+        xml,
+        input.source,
+        input.provider,
+        feedUrl,
+        input.options.ingestedAt,
+      );
+    }),
+  );
+
+  return dedupeSignals(feedResults.flat())
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+    .slice(0, input.options.limit);
+}
+
 async function getRedditAccessToken(
   config: IngestionConfig,
 ): Promise<string> {
@@ -253,6 +536,54 @@ async function getRedditAccessToken(
   }
 
   return payload.access_token;
+}
+
+async function getTikTokAccessToken(
+  config: IngestionConfig,
+): Promise<string> {
+  const payload = await fetchJson<TikTokTokenResponse>(
+    config.tiktok.tokenEndpoint,
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        client_key: config.tiktok.clientKey || "",
+        client_secret: config.tiktok.clientSecret || "",
+        grant_type: "client_credentials",
+      }).toString(),
+    },
+    config.requestTimeoutMs,
+  );
+  const accessToken = payload.access_token ?? payload.data?.access_token;
+
+  if (!accessToken) {
+    throw new Error("TikTok did not return an access token.");
+  }
+
+  return accessToken;
+}
+
+function buildTikTokResearchQuery(config: IngestionConfig): TikTokResearchQuery {
+  const and: TikTokResearchCondition[] = [
+    {
+      operation: "IN",
+      field_name: "region_code",
+      field_values: config.tiktok.regionCodes,
+    },
+  ];
+
+  if (config.tiktok.keywords.length > 0) {
+    and.push({
+      operation: "IN",
+      field_name: "keyword",
+      field_values: config.tiktok.keywords,
+    });
+  }
+
+  return { and };
 }
 
 function normalizeGoogleTrendsJson(
@@ -344,6 +675,14 @@ function findFirstArray(payload: unknown, keys: string[]): unknown[] {
     if (Array.isArray(value)) {
       return value;
     }
+
+    if (isRecord(value)) {
+      const nestedItems = findFirstArray(value, keys);
+
+      if (nestedItems.length > 0) {
+        return nestedItems;
+      }
+    }
   }
 
   const trendingSearchDays = payload.trendingSearchesDays;
@@ -359,6 +698,173 @@ function findFirstArray(payload: unknown, keys: string[]): unknown[] {
   }
 
   return [];
+}
+
+function normalizePublisherJson(
+  payload: unknown,
+  source: IngestSourceId,
+  provider: string,
+  ingestedAt: string,
+): RawSignalRecord[] {
+  const items = findFirstArray(payload, [
+    "articles",
+    "results",
+    "items",
+    "data",
+    "documents",
+    "stories",
+  ]);
+
+  return items
+    .map((item) => normalizeRecordObject(item))
+    .filter((item): item is Record<string, unknown> => Boolean(item))
+    .map((item) => {
+      const title =
+        readArticleTitle(item) ||
+        readString(item, "name") ||
+        `${provider} item`;
+
+      return {
+        source,
+        timestamp:
+          normalizeDate(readString(item, "publishedAt")) ??
+          normalizeDate(readString(item, "published_date")) ??
+          normalizeDate(readString(item, "publication_date")) ??
+          normalizeDate(readString(item, "date")) ??
+          ingestedAt,
+        ingestedAt,
+        title,
+        content:
+          readString(item, "description") ||
+          readString(item, "abstract") ||
+          readString(item, "summary") ||
+          readString(item, "snippet") ||
+          undefined,
+        engagement:
+          readNumber(item, "engagement") ??
+          readNumber(item, "views") ??
+          readNumber(item, "view_count") ??
+          undefined,
+        url:
+          readString(item, "url") ||
+          readString(item, "web_url") ||
+          readString(item, "link") ||
+          undefined,
+        metadata: {
+          provider,
+          section:
+            readString(item, "section") ||
+            readString(item, "section_name") ||
+            null,
+          author:
+            readString(item, "author") ||
+            readString(item, "byline") ||
+            null,
+        },
+        raw: item,
+      };
+    });
+}
+
+function parsePublisherFeedXml(
+  xml: string,
+  source: IngestSourceId,
+  provider: string,
+  feedUrl: string,
+  ingestedAt: string,
+): RawSignalRecord[] {
+  const entries =
+    xml.match(/<item[\s\S]*?<\/item>/gi) ??
+    xml.match(/<entry[\s\S]*?<\/entry>/gi) ??
+    [];
+
+  return entries.map((entryXml) => {
+    const title = stripHtml(readXmlTag(entryXml, "title")) || `${provider} item`;
+    const content = stripHtml(
+      readXmlTag(entryXml, "description") ||
+        readXmlTag(entryXml, "content:encoded") ||
+        readXmlTag(entryXml, "summary"),
+    );
+    const publishedAt =
+      readXmlTag(entryXml, "pubDate") ||
+      readXmlTag(entryXml, "dc:date") ||
+      readXmlTag(entryXml, "published") ||
+      readXmlTag(entryXml, "updated");
+
+    return {
+      source,
+      timestamp: normalizeDate(publishedAt) ?? ingestedAt,
+      ingestedAt,
+      title,
+      content: content || undefined,
+      url: readXmlLink(entryXml) || undefined,
+      metadata: {
+        provider,
+        feedUrl,
+        guid: readXmlTag(entryXml, "guid") || readXmlTag(entryXml, "id") || null,
+        category: readXmlTag(entryXml, "category") || null,
+      },
+      raw: entryXml,
+    };
+  });
+}
+
+function dedupeSignals(records: RawSignalRecord[]): RawSignalRecord[] {
+  const recordsByKey = new Map<string, RawSignalRecord>();
+
+  for (const record of records) {
+    const key = record.url || `${record.source}:${record.title}`;
+
+    if (!recordsByKey.has(key)) {
+      recordsByKey.set(key, record);
+    }
+  }
+
+  return [...recordsByKey.values()];
+}
+
+function buildPublisherHeaders(
+  apiKey: string,
+  userAgent: string | undefined,
+): HeadersInit {
+  return {
+    Accept: "application/json",
+    Authorization: `Bearer ${apiKey}`,
+    "x-api-key": apiKey,
+    ...(userAgent ? { "User-Agent": userAgent } : {}),
+  };
+}
+
+function readArticleTitle(item: Record<string, unknown>): string | undefined {
+  const title = readString(item, "title");
+
+  if (title) {
+    return title;
+  }
+
+  const headline = item.headline;
+
+  if (typeof headline === "string") {
+    return headline;
+  }
+
+  if (isRecord(headline)) {
+    return readString(headline, "main") || readString(headline, "print_headline");
+  }
+
+  return undefined;
+}
+
+function readXmlLink(xml: string): string {
+  const link = readXmlTag(xml, "link");
+
+  if (link) {
+    return link;
+  }
+
+  const hrefMatch = xml.match(/<link[^>]+href=["']([^"']+)["'][^>]*>/i);
+
+  return decodeXml(hrefMatch?.[1]?.trim() ?? "");
 }
 
 function normalizeRecordObject(value: unknown): Record<string, unknown> | null {
@@ -393,6 +899,10 @@ function decodeXml(value: string): string {
     .replaceAll("&gt;", ">")
     .replaceAll("&quot;", "\"")
     .replaceAll("&#39;", "'");
+}
+
+function stripHtml(value: string): string {
+  return value.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function parseApproximateCount(value: string): number | undefined {
@@ -438,6 +948,37 @@ function normalizeDate(value: string | undefined): string | undefined {
 
 function unixSecondsToIso(value: number): string {
   return new Date(value * 1000).toISOString();
+}
+
+function normalizeTikTokTimestamp(value: number | string | undefined): string | undefined {
+  if (typeof value === "number") {
+    return unixSecondsToIso(value);
+  }
+
+  return normalizeDate(value);
+}
+
+function getUtcDateRange(lookbackDays: number): {
+  startDate: string;
+  endDate: string;
+} {
+  const safeLookbackDays = Math.min(Math.max(lookbackDays, 1), 30);
+  const end = new Date();
+  const start = new Date(end);
+  start.setUTCDate(end.getUTCDate() - safeLookbackDays);
+
+  return {
+    startDate: formatUtcDate(start),
+    endDate: formatUtcDate(end),
+  };
+}
+
+function formatUtcDate(date: Date): string {
+  return [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCDate()).padStart(2, "0"),
+  ].join("");
 }
 
 function getPreviousUtcDateParts(): {
@@ -490,6 +1031,12 @@ function readNumber(
   const field = value[key];
 
   return typeof field === "number" && Number.isFinite(field) ? field : undefined;
+}
+
+function sumNumbers(values: Array<number | undefined>): number | undefined {
+  const sum = values.reduce<number>((total, value) => total + (value ?? 0), 0);
+
+  return sum > 0 ? sum : undefined;
 }
 
 type RedditTokenResponse = {
@@ -567,5 +1114,79 @@ type WikipediaTopResponse = {
       views: number;
       rank: number;
     }>;
+  }>;
+};
+
+type TikTokTokenResponse = {
+  access_token?: string;
+  data?: {
+    access_token?: string;
+  };
+};
+
+type TikTokResearchCondition = {
+  operation: "EQ" | "IN" | "GT" | "GTE" | "LT" | "LTE";
+  field_name: string;
+  field_values: string[];
+};
+
+type TikTokResearchQuery = {
+  and: TikTokResearchCondition[];
+};
+
+type TikTokQueryResponse = {
+  data?: {
+    videos?: TikTokVideo[];
+  };
+  videos?: TikTokVideo[];
+};
+
+type TikTokVideo = {
+  id?: string;
+  video_description?: string;
+  create_time?: number | string;
+  region_code?: string;
+  share_count?: number;
+  view_count?: number;
+  like_count?: number;
+  comment_count?: number;
+  favorites_count?: number;
+  hashtag_names?: string[];
+  username?: string;
+};
+
+type TwitterRecentSearchResponse = {
+  data?: TwitterTweet[];
+};
+
+type TwitterTweet = {
+  id: string;
+  text: string;
+  created_at?: string;
+  author_id?: string;
+  lang?: string;
+  possibly_sensitive?: boolean;
+  public_metrics?: {
+    retweet_count?: number;
+    reply_count?: number;
+    like_count?: number;
+    quote_count?: number;
+    bookmark_count?: number;
+    impression_count?: number;
+  };
+};
+
+type NytTopStoriesResponse = {
+  results?: Array<{
+    title: string;
+    abstract?: string;
+    url?: string;
+    published_date?: string;
+    updated_date?: string;
+    section?: string;
+    subsection?: string;
+    byline?: string;
+    item_type?: string;
+    material_type_facet?: string;
   }>;
 };

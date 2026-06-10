@@ -4,6 +4,11 @@ export const INGEST_SOURCE_IDS = [
   "gdelt",
   "news",
   "wikipedia",
+  "tiktok",
+  "twitter",
+  "wsj",
+  "nyt",
+  "washington-post",
 ] as const;
 
 export type IngestSourceId = (typeof INGEST_SOURCE_IDS)[number];

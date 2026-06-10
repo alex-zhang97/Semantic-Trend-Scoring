@@ -28,6 +28,38 @@ export type IngestionConfig = {
     endpoint: string;
     userAgent?: string;
   };
+  tiktok: {
+    tokenEndpoint: string;
+    queryEndpoint: string;
+    clientKey?: string;
+    clientSecret?: string;
+    fields: string[];
+    keywords: string[];
+    regionCodes: string[];
+    lookbackDays: number;
+  };
+  twitter: {
+    endpoint: string;
+    bearerToken?: string;
+    query: string;
+  };
+  wsj: {
+    apiUrl?: string;
+    apiKey?: string;
+    rssUrls: string[];
+    userAgent?: string;
+  };
+  nyt: {
+    endpoint: string;
+    apiKey?: string;
+    section: string;
+  };
+  washingtonPost: {
+    apiUrl?: string;
+    apiKey?: string;
+    rssUrls: string[];
+    userAgent?: string;
+  };
 };
 
 const DEFAULT_SUBREDDITS = [
@@ -38,6 +70,39 @@ const DEFAULT_SUBREDDITS = [
   "entertainment",
   "business",
   "health",
+];
+
+const DEFAULT_TIKTOK_FIELDS = [
+  "id",
+  "video_description",
+  "create_time",
+  "region_code",
+  "share_count",
+  "view_count",
+  "like_count",
+  "comment_count",
+  "hashtag_names",
+  "username",
+];
+
+const DEFAULT_TIKTOK_KEYWORDS = [
+  "news",
+  "politics",
+  "sports",
+  "technology",
+  "entertainment",
+  "business",
+  "health",
+];
+
+const DEFAULT_WASHINGTON_POST_RSS_URLS = [
+  "https://feeds.washingtonpost.com/rss/politics",
+  "https://feeds.washingtonpost.com/rss/national",
+  "https://feeds.washingtonpost.com/rss/world",
+  "https://feeds.washingtonpost.com/rss/business",
+  "https://feeds.washingtonpost.com/rss/business/technology",
+  "https://feeds.washingtonpost.com/rss/lifestyle",
+  "https://feeds.washingtonpost.com/rss/entertainment",
 ];
 
 export function getIngestionConfig(): IngestionConfig {
@@ -76,6 +141,49 @@ export function getIngestionConfig(): IngestionConfig {
         process.env.WIKIPEDIA_PAGEVIEWS_ENDPOINT ||
         "https://wikimedia.org/api/rest_v1/metrics/pageviews/top/en.wikipedia/all-access",
       userAgent: emptyToUndefined(process.env.WIKIMEDIA_USER_AGENT),
+    },
+    tiktok: {
+      tokenEndpoint:
+        process.env.TIKTOK_TOKEN_ENDPOINT ||
+        "https://open.tiktokapis.com/v2/oauth/token/",
+      queryEndpoint:
+        process.env.TIKTOK_RESEARCH_VIDEO_QUERY_ENDPOINT ||
+        "https://open.tiktokapis.com/v2/research/video/query/",
+      clientKey: emptyToUndefined(process.env.TIKTOK_CLIENT_KEY),
+      clientSecret: emptyToUndefined(process.env.TIKTOK_CLIENT_SECRET),
+      fields: readCsv("TIKTOK_RESEARCH_FIELDS", DEFAULT_TIKTOK_FIELDS),
+      keywords: readCsv("TIKTOK_KEYWORDS", DEFAULT_TIKTOK_KEYWORDS),
+      regionCodes: readCsv("TIKTOK_REGION_CODES", ["US"]),
+      lookbackDays: readPositiveInteger("TIKTOK_LOOKBACK_DAYS", 7),
+    },
+    twitter: {
+      endpoint:
+        process.env.TWITTER_RECENT_SEARCH_ENDPOINT ||
+        "https://api.twitter.com/2/tweets/search/recent",
+      bearerToken: emptyToUndefined(process.env.TWITTER_BEARER_TOKEN),
+      query: process.env.TWITTER_SEARCH_QUERY || "lang:en -is:retweet",
+    },
+    wsj: {
+      apiUrl: emptyToUndefined(process.env.WSJ_API_URL),
+      apiKey: emptyToUndefined(process.env.WSJ_API_KEY),
+      rssUrls: readCsv("WSJ_RSS_URLS", []),
+      userAgent: emptyToUndefined(process.env.WSJ_USER_AGENT),
+    },
+    nyt: {
+      endpoint:
+        process.env.NYT_TOP_STORIES_ENDPOINT ||
+        "https://api.nytimes.com/svc/topstories/v2",
+      apiKey: emptyToUndefined(process.env.NYT_API_KEY),
+      section: process.env.NYT_TOP_STORIES_SECTION || "home",
+    },
+    washingtonPost: {
+      apiUrl: emptyToUndefined(process.env.WASHINGTON_POST_API_URL),
+      apiKey: emptyToUndefined(process.env.WASHINGTON_POST_API_KEY),
+      rssUrls: readCsv(
+        "WASHINGTON_POST_RSS_URLS",
+        DEFAULT_WASHINGTON_POST_RSS_URLS,
+      ),
+      userAgent: emptyToUndefined(process.env.WASHINGTON_POST_USER_AGENT),
     },
   };
 }
@@ -159,6 +267,95 @@ export function getSourceConfigStatuses(
       }),
       notes:
         "Wikimedia asks callers to identify the app with a useful User-Agent.",
+    },
+    tiktok: {
+      id: "tiktok",
+      label: "TikTok Research API",
+      enabled: true,
+      ready: Boolean(config.tiktok.clientKey && config.tiktok.clientSecret),
+      requiresApiKey: true,
+      requiredEnv: ["TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET"],
+      optionalEnv: [
+        "TIKTOK_TOKEN_ENDPOINT",
+        "TIKTOK_RESEARCH_VIDEO_QUERY_ENDPOINT",
+        "TIKTOK_RESEARCH_FIELDS",
+        "TIKTOK_KEYWORDS",
+        "TIKTOK_REGION_CODES",
+        "TIKTOK_LOOKBACK_DAYS",
+      ],
+      missingEnv: missingEnv({
+        TIKTOK_CLIENT_KEY: config.tiktok.clientKey,
+        TIKTOK_CLIENT_SECRET: config.tiktok.clientSecret,
+      }),
+      notes:
+        "Requires TikTok Research API approval and the research.data.basic scope.",
+    },
+    twitter: {
+      id: "twitter",
+      label: "Twitter/X Recent Search",
+      enabled: true,
+      ready: Boolean(config.twitter.bearerToken),
+      requiresApiKey: true,
+      requiredEnv: ["TWITTER_BEARER_TOKEN"],
+      optionalEnv: ["TWITTER_RECENT_SEARCH_ENDPOINT", "TWITTER_SEARCH_QUERY"],
+      missingEnv: missingEnv({
+        TWITTER_BEARER_TOKEN: config.twitter.bearerToken,
+      }),
+      notes:
+        "Uses X API v2 recent search; the default query is broad English non-retweets.",
+    },
+    wsj: {
+      id: "wsj",
+      label: "Wall Street Journal",
+      enabled: true,
+      ready: Boolean(
+        (config.wsj.apiUrl && config.wsj.apiKey) || config.wsj.rssUrls.length,
+      ),
+      requiresApiKey: config.wsj.rssUrls.length === 0,
+      requiredEnv: ["WSJ_API_URL", "WSJ_API_KEY"],
+      optionalEnv: ["WSJ_API_URL", "WSJ_API_KEY", "WSJ_RSS_URLS", "WSJ_USER_AGENT"],
+      missingEnv:
+        config.wsj.apiUrl && config.wsj.apiKey
+          ? []
+          : missingEnv({
+              WSJ_API_URL: config.wsj.apiUrl,
+              WSJ_API_KEY: config.wsj.apiKey,
+            }),
+      notes:
+        "Uses configured Dow Jones/WSJ API credentials, or explicit WSJ_RSS_URLS if you choose feed ingestion.",
+    },
+    nyt: {
+      id: "nyt",
+      label: "New York Times",
+      enabled: true,
+      ready: Boolean(config.nyt.apiKey),
+      requiresApiKey: true,
+      requiredEnv: ["NYT_API_KEY"],
+      optionalEnv: ["NYT_TOP_STORIES_ENDPOINT", "NYT_TOP_STORIES_SECTION"],
+      missingEnv: missingEnv({
+        NYT_API_KEY: config.nyt.apiKey,
+      }),
+      notes: "Uses the NYT Top Stories API.",
+    },
+    "washington-post": {
+      id: "washington-post",
+      label: "Washington Post",
+      enabled: true,
+      ready: Boolean(
+        (config.washingtonPost.apiUrl && config.washingtonPost.apiKey) ||
+          config.washingtonPost.rssUrls.length,
+      ),
+      requiresApiKey: false,
+      requiredEnv: [],
+      optionalEnv: [
+        "WASHINGTON_POST_API_URL",
+        "WASHINGTON_POST_API_KEY",
+        "WASHINGTON_POST_RSS_URLS",
+        "WASHINGTON_POST_USER_AGENT",
+      ],
+      missingEnv: [],
+      notes:
+        "Uses a configured Washington Post API when provided, otherwise official RSS feeds.",
     },
   };
 

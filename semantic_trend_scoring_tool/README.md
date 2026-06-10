@@ -20,7 +20,7 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 ## Ingest API
 
-The ingestion endpoint follows the sources listed in `AGENTS.md`: Google Trends, Reddit, GDELT, News APIs, and Wikipedia Pageviews.
+The ingestion endpoint follows the sources listed in `AGENTS.md` plus additional publisher and social feeds: Google Trends, Reddit, GDELT, News APIs, Wikipedia Pageviews, TikTok, Twitter/X, Wall Street Journal, New York Times, and Washington Post.
 
 Copy `.env.example` to `.env.local` and fill in the keys you have. Sources with missing credentials are skipped instead of failing the whole run.
 
@@ -47,7 +47,7 @@ Run a subset:
 ```bash
 curl -X POST http://localhost:3000/api/ingest \
   -H "Content-Type: application/json" \
-  -d '{"sources":["gdelt","wikipedia"],"limit":10}'
+  -d '{"sources":["gdelt","wikipedia","tiktok","twitter","wsj","nyt","washington-post"],"limit":10}'
 ```
 
 Each raw signal includes `source`, source `timestamp`, `ingestedAt`, `title`, optional `content`, optional `engagement`, optional `url`, and the unmodified source payload in `raw`.

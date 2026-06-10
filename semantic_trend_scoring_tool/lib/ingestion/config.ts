@@ -4,9 +4,8 @@ export type IngestionConfig = {
   defaultLimit: number;
   requestTimeoutMs: number;
   googleTrends: {
-    rssUrl: string;
-    apiUrl?: string;
-    apiKey?: string;
+    geo: string;
+    lang: string;
   };
   reddit: {
     clientId?: string;
@@ -110,11 +109,8 @@ export function getIngestionConfig(): IngestionConfig {
     defaultLimit: readPositiveInteger("INGEST_DEFAULT_LIMIT", 25),
     requestTimeoutMs: readPositiveInteger("INGEST_REQUEST_TIMEOUT_MS", 10_000),
     googleTrends: {
-      rssUrl:
-        process.env.GOOGLE_TRENDS_RSS_URL ||
-        "https://trends.google.com/trending/rss?geo=US",
-      apiUrl: emptyToUndefined(process.env.GOOGLE_TRENDS_API_URL),
-      apiKey: emptyToUndefined(process.env.GOOGLE_TRENDS_API_KEY),
+      geo: process.env.GOOGLE_TRENDS_GEO || "US",
+      lang: process.env.GOOGLE_TRENDS_LANG || "en",
     },
     reddit: {
       clientId: emptyToUndefined(process.env.REDDIT_CLIENT_ID),
@@ -196,19 +192,12 @@ export function getSourceConfigStatuses(
       id: "google-trends",
       label: "Google Trends",
       enabled: true,
-      ready: Boolean(config.googleTrends.rssUrl || config.googleTrends.apiUrl),
+      ready: true,
       requiresApiKey: false,
       requiredEnv: [],
-      optionalEnv: [
-        "GOOGLE_TRENDS_RSS_URL",
-        "GOOGLE_TRENDS_API_URL",
-        "GOOGLE_TRENDS_API_KEY",
-      ],
+      optionalEnv: ["GOOGLE_TRENDS_GEO", "GOOGLE_TRENDS_LANG"],
       missingEnv: [],
-      notes:
-        config.googleTrends.apiUrl && !config.googleTrends.apiKey
-          ? "Custom Google Trends API URL configured without GOOGLE_TRENDS_API_KEY; RSS fallback will be used."
-          : "Uses the public US daily trends RSS feed unless a custom API URL is configured.",
+      notes: "Uses @shaivpidadi/trends-js dailyTrends method.",
     },
     reddit: {
       id: "reddit",

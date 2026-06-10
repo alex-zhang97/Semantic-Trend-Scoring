@@ -1,3 +1,4 @@
+import GoogleTrendsApi from "@shaivpidadi/trends-js";
 import type { IngestionConfig } from "./config";
 import { buildUrl, fetchJson, fetchText } from "./http";
 import type { IngestSourceId, RawSignalRecord } from "./types";
@@ -24,31 +25,15 @@ async function fetchGoogleTrendsSignals(
   config: IngestionConfig,
   options: { ingestedAt: string; limit: number },
 ): Promise<RawSignalRecord[]> {
-  if (config.googleTrends.apiUrl && config.googleTrends.apiKey) {
-    const url = buildUrl(config.googleTrends.apiUrl, {
-      api_key: config.googleTrends.apiKey,
-      geo: "US",
-      limit: options.limit,
-    });
-    const payload = await fetchJson<unknown>(
-      url,
-      { headers: { Accept: "application/json" } },
-      config.requestTimeoutMs,
-    );
+  const payload = (await GoogleTrendsApi.dailyTrends({
+    geo: config.googleTrends.geo,
+    lang: config.googleTrends.lang,
+  })) as GoogleTrendsDailyResponse;
 
-    return normalizeGoogleTrendsJson(payload, options.ingestedAt).slice(
-      0,
-      options.limit,
-    );
-  }
-
-  const xml = await fetchText(
-    config.googleTrends.rssUrl,
-    { headers: { Accept: "application/rss+xml, application/xml, text/xml" } },
-    config.requestTimeoutMs,
+  return normalizeGoogleDailyTrends(payload, options.ingestedAt).slice(
+    0,
+    options.limit,
   );
-
-  return parseGoogleTrendsRss(xml, options.ingestedAt).slice(0, options.limit);
 }
 
 async function fetchRedditSignals(
@@ -586,78 +571,32 @@ function buildTikTokResearchQuery(config: IngestionConfig): TikTokResearchQuery 
   return { and };
 }
 
-function normalizeGoogleTrendsJson(
-  payload: unknown,
+function normalizeGoogleDailyTrends(
+  payload: GoogleTrendsDailyResponse,
   ingestedAt: string,
 ): RawSignalRecord[] {
-  const items = findFirstArray(payload, [
-    "trends",
-    "items",
-    "results",
-    "dailyTrends",
-    "trendingSearches",
-  ]);
+  const stories = payload.data?.allTrendingStories ?? [];
 
-  return items
-    .map((item) => normalizeRecordObject(item))
-    .filter((item): item is Record<string, unknown> => Boolean(item))
-    .map((item) => {
-      const title =
-        readString(item, "title") ||
-        readString(item, "query") ||
-        readString(item, "name") ||
-        readString(item, "keyword") ||
-        "Untitled Google Trends item";
-
-      return {
-        source: "google-trends",
-        timestamp:
-          normalizeDate(readString(item, "publishedAt")) ??
-          normalizeDate(readString(item, "date")) ??
-          ingestedAt,
-        ingestedAt,
-        title,
-        content:
-          readString(item, "description") ||
-          readString(item, "summary") ||
-          undefined,
-        engagement:
-          readNumber(item, "traffic") ??
-          readNumber(item, "searchVolume") ??
-          undefined,
-        url: readString(item, "url") || readString(item, "link") || undefined,
-        raw: item,
-      };
-    });
-}
-
-function parseGoogleTrendsRss(
-  xml: string,
-  ingestedAt: string,
-): RawSignalRecord[] {
-  const itemMatches = xml.match(/<item[\s\S]*?<\/item>/gi) ?? [];
-
-  return itemMatches.map((itemXml) => {
-    const title = readXmlTag(itemXml, "title") || "Untitled Google trend";
-    const publishedAt = readXmlTag(itemXml, "pubDate");
-    const traffic = readXmlTag(itemXml, "ht:approx_traffic");
-
-    return {
-      source: "google-trends",
-      timestamp: normalizeDate(publishedAt) ?? ingestedAt,
+  return stories.map((story) => ({
+    source: "google-trends",
+    timestamp:
+      typeof story.startTime === "number"
+        ? unixSecondsToIso(story.startTime)
+        : ingestedAt,
       ingestedAt,
-      title,
-      content: readXmlTag(itemXml, "description") || undefined,
-      engagement: parseApproximateCount(traffic),
-      url: readXmlTag(itemXml, "link") || undefined,
-      metadata: {
-        approximateTraffic: traffic || null,
-        picture: readXmlTag(itemXml, "ht:picture") || null,
-        pictureSource: readXmlTag(itemXml, "ht:picture_source") || null,
-      },
-      raw: itemXml,
-    };
-  });
+    title: story.title,
+    content: story.articles?.map((article) => article.title).join("\n") || undefined,
+    engagement: parseApproximateCount(story.traffic),
+    url: normalizeGoogleTrendsShareUrl(story.shareUrl),
+    metadata: {
+      traffic: story.traffic,
+      endTime: story.endTime ?? null,
+      imageUrl: story.image?.imageUrl ?? null,
+      imageSource: story.image?.source ?? null,
+      articleCount: story.articles?.length ?? 0,
+    },
+    raw: story,
+  }));
 }
 
 function findFirstArray(payload: unknown, keys: string[]): unknown[] {
@@ -919,7 +858,14 @@ function parseApproximateCount(value: string): number | undefined {
   }
 
   const amount = Number.parseFloat(match[1]);
-  const multiplier = match[2] === "B" ? 1_000_000_000 : match[2] === "M" ? 1_000_000 : match[2] === "K" ? 1_000 : 1;
+  const multiplier =
+    match[2] === "B"
+      ? 1_000_000_000
+      : match[2] === "M"
+        ? 1_000_000
+        : match[2] === "K"
+          ? 1_000
+          : 1;
 
   return Math.round(amount * multiplier);
 }
@@ -1033,6 +979,18 @@ function readNumber(
   return typeof field === "number" && Number.isFinite(field) ? field : undefined;
 }
 
+function normalizeGoogleTrendsShareUrl(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  if (value.startsWith("http://") || value.startsWith("https://")) {
+    return value;
+  }
+
+  return `https://trends.google.com/trends/explore?q=${encodeURIComponent(value)}`;
+}
+
 function sumNumbers(values: Array<number | undefined>): number | undefined {
   const sum = values.reduce<number>((total, value) => total + (value ?? 0), 0);
 
@@ -1115,6 +1073,30 @@ type WikipediaTopResponse = {
       rank: number;
     }>;
   }>;
+};
+
+type GoogleTrendsDailyResponse = {
+  data?: {
+    allTrendingStories?: Array<{
+      title: string;
+      traffic: string;
+      shareUrl?: string;
+      startTime?: number;
+      endTime?: number;
+      image?: {
+        newsUrl?: string;
+        source?: string;
+        imageUrl?: string;
+      };
+      articles?: Array<{
+        title: string;
+        url?: string;
+        source?: string;
+        time?: string;
+        snippet?: string;
+      }>;
+    }>;
+  };
 };
 
 type TikTokTokenResponse = {

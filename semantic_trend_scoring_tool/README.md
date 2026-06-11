@@ -18,6 +18,40 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
+## Ingest API
+
+The ingestion endpoint follows the sources listed in `AGENTS.md` plus additional publisher and social feeds: Google Trends, Reddit, GDELT, News APIs, Wikipedia Pageviews, TikTok, Twitter/X, Wall Street Journal, New York Times, and Washington Post.
+
+Copy `.env.example` to `.env.local` and fill in the keys you have. Sources with missing credentials are skipped instead of failing the whole run.
+
+```bash
+cp .env.example .env.local
+```
+
+Check source readiness:
+
+```bash
+curl http://localhost:3000/api/ingest
+```
+
+Run ingestion across all configured sources:
+
+```bash
+curl -X POST http://localhost:3000/api/ingest \
+  -H "Content-Type: application/json" \
+  -d '{"limit":10}'
+```
+
+Run a subset:
+
+```bash
+curl -X POST http://localhost:3000/api/ingest \
+  -H "Content-Type: application/json" \
+  -d '{"sources":["gdelt","wikipedia","tiktok","twitter","wsj","nyt","washington-post"],"limit":10}'
+```
+
+Each raw signal includes `source`, source `timestamp`, `ingestedAt`, `title`, optional `content`, optional `engagement`, optional `url`, and the unmodified source payload in `raw`.
+
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
 ## Learn More

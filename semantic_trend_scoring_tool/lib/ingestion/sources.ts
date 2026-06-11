@@ -293,17 +293,18 @@ async function fetchTwitterSignals(
   options: { ingestedAt: string; limit: number },
 ): Promise<RawSignalRecord[]> {
   if (!config.twitter.bearerToken) {
-    throw new Error("Missing TWITTER_BEARER_TOKEN.");
+    throw new Error("Missing X_BEARER_TOKEN.");
   }
 
-  const url = buildUrl(config.twitter.endpoint, {
-    query: config.twitter.query,
-    max_results: Math.min(Math.max(options.limit, 10), 100),
-    "tweet.fields":
-      "created_at,public_metrics,author_id,lang,possibly_sensitive,context_annotations,entities",
-    expansions: "author_id",
+  const maxTrends = Math.min(
+    Math.max(Math.min(options.limit, config.twitter.maxTrends), 1),
+    50,
+  );
+  const url = buildUrl(`${config.twitter.endpoint}/${config.twitter.woeid}`, {
+    max_trends: maxTrends,
+    "trend.fields": config.twitter.fields.join(","),
   });
-  const payload = await fetchJson<TwitterRecentSearchResponse>(
+  const payload = await fetchJson<XTrendsByWoeidResponse>(
     url,
     {
       headers: {
@@ -314,28 +315,26 @@ async function fetchTwitterSignals(
     config.requestTimeoutMs,
   );
 
-  return (payload.data ?? []).slice(0, options.limit).map((tweet) => ({
+  if (!payload.data?.length && payload.errors?.length) {
+    throw new Error(
+      payload.errors
+        .map((error) => error.detail || error.title || "Unknown X trends error.")
+        .join("; "),
+    );
+  }
+
+  return (payload.data ?? []).slice(0, options.limit).map((trend) => ({
     source: "twitter",
-    timestamp: normalizeDate(tweet.created_at) ?? options.ingestedAt,
+    timestamp: options.ingestedAt,
     ingestedAt: options.ingestedAt,
-    title: tweet.text,
-    content: tweet.text,
-    engagement: sumNumbers([
-      tweet.public_metrics?.retweet_count,
-      tweet.public_metrics?.reply_count,
-      tweet.public_metrics?.like_count,
-      tweet.public_metrics?.quote_count,
-      tweet.public_metrics?.bookmark_count,
-      tweet.public_metrics?.impression_count,
-    ]),
-    url: `https://twitter.com/i/web/status/${tweet.id}`,
+    title: trend.trend_name,
+    engagement: trend.tweet_count,
+    url: `https://x.com/search?q=${encodeURIComponent(trend.trend_name)}&src=trend_click`,
     metadata: {
-      id: tweet.id,
-      authorId: tweet.author_id ?? null,
-      language: tweet.lang ?? null,
-      possiblySensitive: tweet.possibly_sensitive ?? null,
+      woeid: config.twitter.woeid,
+      tweetCount: trend.tweet_count ?? null,
     },
-    raw: tweet,
+    raw: trend,
   }));
 }
 
@@ -1137,25 +1136,17 @@ type TikTokVideo = {
   username?: string;
 };
 
-type TwitterRecentSearchResponse = {
-  data?: TwitterTweet[];
-};
-
-type TwitterTweet = {
-  id: string;
-  text: string;
-  created_at?: string;
-  author_id?: string;
-  lang?: string;
-  possibly_sensitive?: boolean;
-  public_metrics?: {
-    retweet_count?: number;
-    reply_count?: number;
-    like_count?: number;
-    quote_count?: number;
-    bookmark_count?: number;
-    impression_count?: number;
-  };
+type XTrendsByWoeidResponse = {
+  data?: Array<{
+    trend_name: string;
+    tweet_count?: number;
+  }>;
+  errors?: Array<{
+    title?: string;
+    type?: string;
+    detail?: string;
+    status?: number;
+  }>;
 };
 
 type NytTopStoriesResponse = {

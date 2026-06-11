@@ -40,7 +40,9 @@ export type IngestionConfig = {
   twitter: {
     endpoint: string;
     bearerToken?: string;
-    query: string;
+    woeid: number;
+    maxTrends: number;
+    fields: string[];
   };
   wsj: {
     apiUrl?: string;
@@ -154,10 +156,14 @@ export function getIngestionConfig(): IngestionConfig {
     },
     twitter: {
       endpoint:
-        process.env.TWITTER_RECENT_SEARCH_ENDPOINT ||
-        "https://api.twitter.com/2/tweets/search/recent",
-      bearerToken: emptyToUndefined(process.env.TWITTER_BEARER_TOKEN),
-      query: process.env.TWITTER_SEARCH_QUERY || "lang:en -is:retweet",
+        process.env.X_TRENDS_BY_WOEID_ENDPOINT ||
+        "https://api.x.com/2/trends/by/woeid",
+      bearerToken: emptyToUndefined(
+        process.env.X_BEARER_TOKEN || process.env.TWITTER_BEARER_TOKEN,
+      ),
+      woeid: readPositiveInteger("X_TRENDS_WOEID", 23_424_977),
+      maxTrends: readPositiveInteger("X_TRENDS_MAX_TRENDS", 20),
+      fields: readCsv("X_TREND_FIELDS", ["trend_name", "tweet_count"]),
     },
     wsj: {
       apiUrl: emptyToUndefined(process.env.WSJ_API_URL),
@@ -281,17 +287,23 @@ export function getSourceConfigStatuses(
     },
     twitter: {
       id: "twitter",
-      label: "Twitter/X Recent Search",
+      label: "X Trends by WOEID",
       enabled: true,
       ready: Boolean(config.twitter.bearerToken),
       requiresApiKey: true,
-      requiredEnv: ["TWITTER_BEARER_TOKEN"],
-      optionalEnv: ["TWITTER_RECENT_SEARCH_ENDPOINT", "TWITTER_SEARCH_QUERY"],
+      requiredEnv: ["X_BEARER_TOKEN"],
+      optionalEnv: [
+        "X_TRENDS_BY_WOEID_ENDPOINT",
+        "X_TRENDS_WOEID",
+        "X_TRENDS_MAX_TRENDS",
+        "X_TREND_FIELDS",
+        "TWITTER_BEARER_TOKEN",
+      ],
       missingEnv: missingEnv({
-        TWITTER_BEARER_TOKEN: config.twitter.bearerToken,
+        X_BEARER_TOKEN: config.twitter.bearerToken,
       }),
       notes:
-        "Uses X API v2 recent search; the default query is broad English non-retweets.",
+        "Uses X API v2 Trends by WOEID. Defaults to United States WOEID 23424977.",
     },
     wsj: {
       id: "wsj",

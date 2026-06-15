@@ -1,36 +1,106 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Semantic Trend Scoring Tool
+
+Next.js dashboard and API routes for semantic trend extraction and topic-level public attention scoring.
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) to use the dashboard.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Authentication
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Both API routes support optional bearer authentication. Set `TOPIC_API_TOKEN` to require requests to include:
 
-## Learn More
+```http
+Authorization: Bearer <token>
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Attention Scoring API
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+`POST /api/attention` scores public attention for already identified topics. It normalizes each supplied metric against its historical baseline, averages the provided volume signals, and applies default component weights.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Default weights:
 
-## Deploy on Vercel
+```json
+{
+  "volume": 0.4,
+  "velocity": 0.3,
+  "acceleration": 0.1,
+  "diversity": 0.1,
+  "persistence": 0.1
+}
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Example request:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```json
+{
+  "topics": [
+    {
+      "topicId": "consumer-ai-agents",
+      "metrics": {
+        "mentions": { "value": 4200, "baseline": { "min": 500, "max": 5000 } },
+        "searches": { "value": 81000, "baseline": { "min": 12000, "max": 90000 } },
+        "views": { "value": 3200000, "baseline": { "min": 400000, "max": 4000000 } },
+        "velocity": { "value": 0.62, "baseline": { "min": -0.1, "max": 0.9 } },
+        "acceleration": { "value": 0.18, "baseline": { "min": -0.3, "max": 0.4 } },
+        "diversity": { "value": 16, "baseline": { "min": 1, "max": 24 } },
+        "persistence": { "value": 5, "baseline": { "min": 1, "max": 10 } }
+      }
+    }
+  ],
+  "options": {
+    "weights": {
+      "volume": 0.45,
+      "velocity": 0.25
+    }
+  }
+}
+```
+
+Custom weights are merged with defaults, validated as nonnegative finite numbers, then normalized to sum to `1`.
+
+Example response:
+
+```json
+{
+  "requestId": "4c62f7db-d830-43df-960f-b2fa19892bdf",
+  "scores": [
+    {
+      "topicId": "consumer-ai-agents",
+      "attentionScore": 0.731,
+      "components": {
+        "volume": 0.828,
+        "velocity": 0.72,
+        "acceleration": 0.686,
+        "diversity": 0.652,
+        "persistence": 0.444
+      },
+      "volumeSignals": {
+        "mentions": 0.822,
+        "searches": 0.885,
+        "views": 0.778
+      },
+      "weights": {
+        "volume": 0.45,
+        "velocity": 0.25,
+        "acceleration": 0.1,
+        "diversity": 0.1,
+        "persistence": 0.1
+      }
+    }
+  ]
+}
+```
+
+`GET /api/attention` returns route metadata, limits, normalization rules, and default weights.
+
+## Topic Extraction API
+
+`POST /api/topics` extracts source-grounded semantic topics from source documents. It uses OpenAI when `OPENAI_API_KEY` is configured and falls back to local keyword extraction otherwise.
+
+`GET /api/topics` returns route metadata and extraction limits.

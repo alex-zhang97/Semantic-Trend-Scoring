@@ -1,12 +1,12 @@
 import {
-  extractTopics,
-  getTopicApiMetadata,
-  parseTopicRequest,
-} from "@/lib/topic-extraction";
+  getAttentionApiMetadata,
+  parseAttentionRequest,
+  scoreAttention,
+} from "@/lib/attention-scoring";
 import { validateBearerAuthorization } from "@/lib/api-auth";
 
 export async function GET() {
-  return Response.json(getTopicApiMetadata());
+  return Response.json(getAttentionApiMetadata());
 }
 
 export async function POST(request: Request) {
@@ -37,7 +37,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const parsed = parseTopicRequest(body);
+  const parsed = parseAttentionRequest(body);
 
   if (!parsed.ok) {
     return Response.json(
@@ -49,7 +49,5 @@ export async function POST(request: Request) {
     );
   }
 
-  const response = await extractTopics(parsed.value, requestId);
-
-  return Response.json(response);
+  return Response.json(scoreAttention(parsed.value, requestId));
 }

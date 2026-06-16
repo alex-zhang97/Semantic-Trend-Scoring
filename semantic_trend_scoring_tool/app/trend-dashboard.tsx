@@ -9,7 +9,6 @@ import {
   STORAGE_KEY,
   buildSnapshotFromResponse,
   getCompactSnapshotLabel,
-  getMonthTickLabel,
   getOpportunityScore,
   mergeSnapshotsWithSeedSnapshots,
   sortSnapshots,
@@ -278,16 +277,11 @@ export function TrendDashboard() {
             ) : null}
           </div>
 
-          <DateScrubber
+          <SnapshotDatePicker
             snapshots={sortedSnapshots}
             selectedIndex={selectedIndex}
-            onSelectIndex={(index) => {
-              const nextDate = sortedSnapshots[index]?.date;
-
-              if (nextDate) {
-                setSelectedDate(nextDate);
-              }
-            }}
+            selectedDate={selectedSnapshot?.date ?? selectedDate}
+            onSelectDate={setSelectedDate}
           />
 
           <div className="timeline-frame">
@@ -311,7 +305,14 @@ export function TrendDashboard() {
 
         <aside className="inspector-panel" aria-label="Pillar breakdown">
           {selectedPillar ? (
-            <PillarInspector snapshot={selectedSnapshot} pillar={selectedPillar} />
+            <>
+              <PillarInspector snapshot={selectedSnapshot} pillar={selectedPillar} />
+              <ChatbotCard
+                key={`${selectedSnapshot?.date}-${selectedPillar.id}`}
+                snapshot={selectedSnapshot}
+                pillar={selectedPillar}
+              />
+            </>
           ) : null}
         </aside>
       </section>
@@ -334,42 +335,42 @@ export function TrendDashboard() {
   );
 }
 
-function DateScrubber({
+function SnapshotDatePicker({
   snapshots,
   selectedIndex,
-  onSelectIndex,
+  selectedDate,
+  onSelectDate,
 }: {
   snapshots: TrendSnapshot[];
   selectedIndex: number;
-  onSelectIndex: (index: number) => void;
+  selectedDate: string;
+  onSelectDate: (date: string) => void;
 }) {
-  const ticks = buildScrubberTicks(snapshots, selectedIndex);
+  const selectedSnapshot = snapshots[selectedIndex];
+  const firstDate = snapshots[0]?.date ?? selectedDate;
+  const lastDate = snapshots[snapshots.length - 1]?.date ?? selectedDate;
+  const selectNearestDate = (date: string) =>
+    onSelectDate(nearestSnapshotDate(snapshots, date));
 
   return (
-    <div className="scrubber-wrap">
-      <div className="scrubber-meta">
-        <span>Timeline scrubber</span>
-        <strong>{snapshots[selectedIndex]?.label}</strong>
+    <div className="date-picker-card">
+      <div className="date-picker-meta">
+        <span>Date</span>
+        <strong>{selectedSnapshot?.label}</strong>
       </div>
-      <input
-        aria-label="Select trend snapshot date"
-        className="date-scrubber"
-        type="range"
-        min={0}
-        max={Math.max(0, snapshots.length - 1)}
-        value={selectedIndex}
-        onChange={(event) => onSelectIndex(Number(event.target.value))}
-      />
-      <div className="scrubber-ticks" aria-hidden="true">
-        {ticks.map((tick) => (
-          <span
-            key={tick.date}
-            className={tick.selected ? "scrubber-tick is-selected" : "scrubber-tick"}
-            style={{ left: `${tick.position}%` }}
-          >
-            {tick.label}
-          </span>
-        ))}
+      <div className="date-picker-row">
+        <input
+          aria-label="Select trend snapshot date"
+          type="date"
+          min={firstDate}
+          max={lastDate}
+          value={selectedDate}
+          onChange={(event) => selectNearestDate(event.target.value)}
+          onInput={(event) => selectNearestDate(event.currentTarget.value)}
+        />
+        <span>
+          {getCompactSnapshotLabel(firstDate, true)} to {getCompactSnapshotLabel(lastDate, true)}
+        </span>
       </div>
     </div>
   );
@@ -490,6 +491,84 @@ function PillarInspector({
         </div>
       </div>
     </>
+  );
+}
+
+function ChatbotCard({
+  snapshot,
+  pillar,
+}: {
+  snapshot?: TrendSnapshot;
+  pillar: NonNullable<TrendSnapshot["pillars"][number]>;
+}) {
+  const opportunity = getOpportunityScore(pillar);
+  const [draft, setDraft] = useState("");
+  const [messages, setMessages] = useState<Array<{ role: "assistant" | "user"; text: string }>>([
+    {
+      role: "assistant",
+      text: `${pillar.shortLabel} is at ${Math.round(
+        pillar.score * 100,
+      )} water-cooler dominance on ${snapshot?.label ?? "this date"}. Best Western is in ${opportunity.tier.toLowerCase()} range at ${opportunity.scoreOutOf10.toFixed(1)}/10.`,
+    },
+  ]);
+
+  function submitMessage() {
+    const question = draft.trim();
+
+    if (!question) {
+      return;
+    }
+
+    const topTopic = pillar.contributions[0]?.label ?? pillar.shortLabel;
+
+    setMessages((current) => [
+      ...current,
+      {
+        role: "user",
+        text: question,
+      },
+      {
+        role: "assistant",
+        text: `${topTopic} is the leading signal. ${opportunity.recommendation}`,
+      },
+    ]);
+    setDraft("");
+  }
+
+  return (
+    <section className="chatbot-card" aria-label="Trend analyst chatbot">
+      <div className="chatbot-head">
+        <div>
+          <p className="section-kicker">Trend analyst</p>
+          <h3>Best Western chat</h3>
+        </div>
+        <ChatIcon />
+      </div>
+      <div className="chatbot-thread">
+        {messages.map((message, index) => (
+          <p key={`${message.role}-${index}`} className={`chat-message is-${message.role}`}>
+            {message.text}
+          </p>
+        ))}
+      </div>
+      <form
+        className="chatbot-input-row"
+        onSubmit={(event) => {
+          event.preventDefault();
+          submitMessage();
+        }}
+      >
+        <input
+          aria-label="Ask the trend analyst"
+          value={draft}
+          placeholder="Ask about timing, offers, or operations"
+          onChange={(event) => setDraft(event.target.value)}
+        />
+        <button type="submit" aria-label="Send chat message" disabled={!draft.trim()}>
+          <SendIcon />
+        </button>
+      </form>
+    </section>
   );
 }
 
@@ -734,59 +813,30 @@ function TrashIcon() {
   );
 }
 
+function ChatIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 5.5h16v10.8H9.5L5.2 20v-3.7H4V5.5Z" />
+      <path d="M8 9h8M8 12.5h5" />
+    </svg>
+  );
+}
+
+function SendIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m4 12 16-8-4.5 16-3.2-6.3L4 12Z" />
+      <path d="m12.3 13.7 3.2-3.2" />
+    </svg>
+  );
+}
+
 function clamp(value: number, min: number, max: number) {
   if (Number.isNaN(value)) {
     return min;
   }
 
   return Math.min(max, Math.max(min, value));
-}
-
-type ScrubberTick = {
-  date: string;
-  label: string;
-  position: number;
-  selected: boolean;
-};
-
-function buildScrubberTicks(snapshots: TrendSnapshot[], selectedIndex: number): ScrubberTick[] {
-  const ticks = new Map<string, ScrubberTick>();
-  const maxIndex = Math.max(1, snapshots.length - 1);
-  const firstYear = snapshots[0]?.date.slice(0, 4);
-  let monthTickCount = 0;
-
-  snapshots.forEach((snapshot, index) => {
-    const [, month, day] = snapshot.date.split("-");
-
-    if (day !== "01") {
-      return;
-    }
-
-    const includeYear =
-      monthTickCount === 0 || month === "01" || snapshot.date.slice(0, 4) !== firstYear;
-
-    monthTickCount += 1;
-
-    ticks.set(snapshot.date, {
-      date: snapshot.date,
-      label: getMonthTickLabel(snapshot.date, includeYear),
-      position: (index / maxIndex) * 100,
-      selected: false,
-    });
-  });
-
-  const selectedSnapshot = snapshots[selectedIndex];
-
-  if (selectedSnapshot) {
-    ticks.set(selectedSnapshot.date, {
-      date: selectedSnapshot.date,
-      label: getCompactSnapshotLabel(selectedSnapshot.date, true),
-      position: (selectedIndex / maxIndex) * 100,
-      selected: true,
-    });
-  }
-
-  return Array.from(ticks.values()).sort((left, right) => left.position - right.position);
 }
 
 function providerLabel(snapshot?: TrendSnapshot) {
@@ -803,4 +853,30 @@ function providerLabel(snapshot?: TrendSnapshot) {
 
 function isYearSeedSnapshot(snapshot?: TrendSnapshot) {
   return Boolean(snapshot?.requestId.startsWith("year-seed-"));
+}
+
+function nearestSnapshotDate(snapshots: TrendSnapshot[], requestedDate: string) {
+  if (snapshots.some((snapshot) => snapshot.date === requestedDate)) {
+    return requestedDate;
+  }
+
+  const requestedTime = Date.parse(`${requestedDate}T00:00:00.000Z`);
+
+  if (Number.isNaN(requestedTime)) {
+    return snapshots[0]?.date ?? requestedDate;
+  }
+
+  let nearest = snapshots[0]?.date ?? requestedDate;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+
+  for (const snapshot of snapshots) {
+    const distance = Math.abs(Date.parse(`${snapshot.date}T00:00:00.000Z`) - requestedTime);
+
+    if (distance < nearestDistance) {
+      nearest = snapshot.date;
+      nearestDistance = distance;
+    }
+  }
+
+  return nearest;
 }

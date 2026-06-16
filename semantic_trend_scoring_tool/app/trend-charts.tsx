@@ -144,9 +144,9 @@ export function TrendLineChart({
   selectedPillarId,
   onSelectDate,
 }: TrendLineChartProps) {
-  const width = 760;
-  const height = 300;
-  const padding = { top: 24, right: 28, bottom: 40, left: 46 };
+  const width = 900;
+  const height = 380;
+  const padding = { top: 30, right: 34, bottom: 48, left: 52 };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
   const xForIndex = (index: number) =>

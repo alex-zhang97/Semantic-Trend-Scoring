@@ -1,5 +1,5 @@
 import type { PillarId, PillarScore, TrendSnapshot } from "./trend-data";
-import { PILLARS, scoreForPillar } from "./trend-data";
+import { PILLARS, getCompactSnapshotLabel, scoreForPillar } from "./trend-data";
 
 type RadarChartProps = {
   pillars: PillarScore[];
@@ -36,7 +36,7 @@ export function RadarChart({
       className="radar-chart"
       viewBox={`0 0 ${RADAR_SIZE} ${RADAR_SIZE}`}
       role="img"
-      aria-label="Radar chart comparing pillar scores"
+      aria-label="Radar chart comparing relative water-cooler dominance"
     >
       <defs>
         <radialGradient id="radarFill" cx="50%" cy="46%" r="64%">
@@ -162,7 +162,7 @@ export function TrendLineChart({
       className="timeline-chart"
       viewBox={`0 0 ${width} ${height}`}
       role="img"
-      aria-label="Line chart showing pillar scores over time"
+      aria-label="Line chart showing relative water-cooler dominance over time"
     >
       {[0, 0.25, 0.5, 0.75, 1].map((value) => {
         const y = yForScore(value);
@@ -240,7 +240,7 @@ export function TrendLineChart({
         );
       })}
       <text x={padding.left} y={height - 10} className="timeline-date-label">
-        {snapshots[0]?.label.replace(", 2026", "")}
+        {getCompactSnapshotLabel(snapshots[0]?.date, true)}
       </text>
       <text
         x={xForIndex(selectedIndex)}
@@ -248,7 +248,7 @@ export function TrendLineChart({
         textAnchor="middle"
         className="timeline-date-label is-selected"
       >
-        {snapshots[selectedIndex]?.label.replace(", 2026", "")}
+        {getCompactSnapshotLabel(snapshots[selectedIndex]?.date, true)}
       </text>
       <text
         x={width - padding.right}
@@ -256,7 +256,7 @@ export function TrendLineChart({
         textAnchor="end"
         className="timeline-date-label"
       >
-        {snapshots[snapshots.length - 1]?.label.replace(", 2026", "")}
+        {getCompactSnapshotLabel(snapshots[snapshots.length - 1]?.date, true)}
       </text>
     </svg>
   );

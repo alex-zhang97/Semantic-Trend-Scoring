@@ -399,11 +399,42 @@ button {
 }
 
 .scrubber-ticks {
-  display: flex;
-  justify-content: space-between;
+  position: relative;
+  min-height: 32px;
   color: #75807e;
   font-size: 11px;
   font-weight: 560;
+}
+
+.scrubber-tick {
+  position: absolute;
+  top: 2px;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+.scrubber-tick::before {
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  width: 1px;
+  height: 5px;
+  background: #cfd8d5;
+  content: "";
+}
+
+.scrubber-tick.is-selected {
+  top: 17px;
+  z-index: 1;
+  color: var(--accent-dark);
+  font-weight: 780;
+}
+
+.scrubber-tick.is-selected::before {
+  height: 10px;
+  background: var(--accent);
 }
 
 .timeline-frame {
@@ -518,6 +549,111 @@ button {
   color: var(--muted);
   font-size: 12px;
   font-weight: 650;
+}
+
+.opportunity-card {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  border: 1px solid #cfe0dd;
+  border-radius: 8px;
+  background: #f8fbfa;
+  padding: 12px;
+}
+
+.opportunity-head,
+.opportunity-recommendation,
+.opportunity-metrics {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.opportunity-head h3 {
+  margin: 4px 0 0;
+  color: #17211f;
+  font-size: 14px;
+  font-weight: 720;
+  line-height: 1.2;
+}
+
+.opportunity-score {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  color: var(--accent-dark);
+}
+
+.opportunity-score strong {
+  font-size: 30px;
+  line-height: 0.95;
+}
+
+.opportunity-score span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.opportunity-recommendation {
+  align-items: flex-start;
+}
+
+.opportunity-recommendation p {
+  margin: 0;
+  color: #3e4d4a;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.recommendation-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border-radius: 999px;
+  padding: 0 9px;
+  font-size: 11px;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.recommendation-pill.is-monitor {
+  background: #eef3f2;
+  color: #52615e;
+}
+
+.recommendation-pill.is-evaluate {
+  background: #fff3df;
+  color: #865015;
+}
+
+.recommendation-pill.is-activate {
+  background: #e6f4ef;
+  color: #176552;
+}
+
+.opportunity-metrics {
+  border-top: 1px solid #dfe8e5;
+  padding-top: 9px;
+}
+
+.opportunity-metrics div {
+  display: grid;
+  gap: 2px;
+}
+
+.opportunity-metrics span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.opportunity-metrics strong {
+  color: #24312f;
+  font-size: 13px;
+  font-weight: 760;
 }
 
 .contribution-summary {
@@ -893,6 +1029,12 @@ button {
 
   .scrubber-ticks {
     font-size: 10px;
+    min-height: 34px;
+  }
+
+  .scrubber-tick:not(.is-selected) {
+    transform: translateX(-50%) rotate(-18deg);
+    transform-origin: center top;
   }
 
   .drawer-layer {

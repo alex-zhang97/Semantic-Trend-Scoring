@@ -8,6 +8,10 @@ import {
   SEED_SNAPSHOTS,
   STORAGE_KEY,
   buildSnapshotFromResponse,
+  getCompactSnapshotLabel,
+  getMonthTickLabel,
+  getOpportunityScore,
+  mergeSnapshotsWithSeedSnapshots,
   sortSnapshots,
   type ExtractionOptions,
   type PillarId,
@@ -19,8 +23,8 @@ import {
 const MAX_TOTAL_CHARACTERS = 120_000;
 
 export function TrendDashboard() {
-  const [snapshots, setSnapshots] = useState<TrendSnapshot[]>(SEED_SNAPSHOTS);
-  const [selectedDate, setSelectedDate] = useState(
+  const [snapshots, setSnapshots] = useState<TrendSnapshot[]>(() => SEED_SNAPSHOTS);
+  const [selectedDate, setSelectedDate] = useState(() =>
     SEED_SNAPSHOTS[SEED_SNAPSHOTS.length - 1]?.date ?? DEFAULT_OPTIONS.snapshotDate,
   );
   const [selectedPillarId, setSelectedPillarId] = useState<PillarId>("science");
@@ -45,13 +49,13 @@ export function TrendDashboard() {
           const parsed = JSON.parse(stored) as TrendSnapshot[];
 
           if (Array.isArray(parsed) && parsed.length > 0) {
-            const sorted = sortSnapshots(parsed);
-            setSnapshots(sorted);
-            setSelectedDate(sorted[sorted.length - 1].date);
+            const merged = mergeSnapshotsWithSeedSnapshots(parsed);
+            setSnapshots(merged);
+            setSelectedDate(merged[merged.length - 1].date);
           }
         }
       } catch {
-        setError("Stored snapshots could not be read; showing seeded sample history.");
+        setError("Stored snapshots could not be read; showing generated seed history.");
       } finally {
         setIsLoaded(true);
       }
@@ -339,6 +343,8 @@ function DateScrubber({
   selectedIndex: number;
   onSelectIndex: (index: number) => void;
 }) {
+  const ticks = buildScrubberTicks(snapshots, selectedIndex);
+
   return (
     <div className="scrubber-wrap">
       <div className="scrubber-meta">
@@ -355,8 +361,14 @@ function DateScrubber({
         onChange={(event) => onSelectIndex(Number(event.target.value))}
       />
       <div className="scrubber-ticks" aria-hidden="true">
-        {snapshots.map((snapshot) => (
-          <span key={snapshot.date}>{snapshot.label.replace(", 2026", "")}</span>
+        {ticks.map((tick) => (
+          <span
+            key={tick.date}
+            className={tick.selected ? "scrubber-tick is-selected" : "scrubber-tick"}
+            style={{ left: `${tick.position}%` }}
+          >
+            {tick.label}
+          </span>
         ))}
       </div>
     </div>
@@ -371,6 +383,7 @@ function PillarInspector({
   pillar: NonNullable<TrendSnapshot["pillars"][number]>;
 }) {
   const topContribution = pillar.contributions[0];
+  const opportunity = getOpportunityScore(pillar);
 
   return (
     <>
@@ -379,9 +392,38 @@ function PillarInspector({
         <h2>{pillar.label}</h2>
         <div className="score-lockup">
           <strong>{Math.round(pillar.score * 100)}</strong>
-          <span>pillar score</span>
+          <span>water-cooler dominance</span>
         </div>
       </div>
+
+      <section className="opportunity-card" aria-label={`Opportunity for ${opportunity.companyName}`}>
+        <div className="opportunity-head">
+          <div>
+            <p className="section-kicker">Opportunity for {opportunity.companyName}</p>
+            <h3>{opportunity.industry}</h3>
+          </div>
+          <div className="opportunity-score">
+            <strong>{opportunity.scoreOutOf10.toFixed(1)}</strong>
+            <span>/10</span>
+          </div>
+        </div>
+        <div className="opportunity-recommendation">
+          <span className={`recommendation-pill is-${opportunity.tier.toLowerCase()}`}>
+            {opportunity.tier}
+          </span>
+          <p>{opportunity.recommendation}</p>
+        </div>
+        <div className="opportunity-metrics">
+          <div>
+            <span>Industry fit</span>
+            <strong>{Math.round(opportunity.industryFit * 100)}</strong>
+          </div>
+          <div>
+            <span>Water-cooler</span>
+            <strong>{Math.round(opportunity.waterCoolerDominance * 100)}</strong>
+          </div>
+        </div>
+      </section>
 
       <div className="contribution-summary">
         <span style={{ background: pillar.color }} />
@@ -434,7 +476,7 @@ function PillarInspector({
       <div className="request-meta">
         <div>
           <span>Provider</span>
-          <strong>{snapshot?.provider === "openai" ? "OpenAI" : "Local fallback"}</strong>
+          <strong>{providerLabel(snapshot)}</strong>
         </div>
         <div>
           <span>Request</span>
@@ -615,11 +657,12 @@ function SettingsDrawer({
 
 function StatusPill({ snapshot }: { snapshot?: TrendSnapshot }) {
   const degraded = snapshot?.degraded;
+  const seed = isYearSeedSnapshot(snapshot);
 
   return (
     <div className={degraded ? "status-pill is-warning" : "status-pill"}>
       <span />
-      {degraded ? "Local fallback" : "OpenAI"}
+      {seed ? "Seed data" : degraded ? "Local fallback" : "OpenAI"}
     </div>
   );
 }
@@ -697,4 +740,67 @@ function clamp(value: number, min: number, max: number) {
   }
 
   return Math.min(max, Math.max(min, value));
+}
+
+type ScrubberTick = {
+  date: string;
+  label: string;
+  position: number;
+  selected: boolean;
+};
+
+function buildScrubberTicks(snapshots: TrendSnapshot[], selectedIndex: number): ScrubberTick[] {
+  const ticks = new Map<string, ScrubberTick>();
+  const maxIndex = Math.max(1, snapshots.length - 1);
+  const firstYear = snapshots[0]?.date.slice(0, 4);
+  let monthTickCount = 0;
+
+  snapshots.forEach((snapshot, index) => {
+    const [, month, day] = snapshot.date.split("-");
+
+    if (day !== "01") {
+      return;
+    }
+
+    const includeYear =
+      monthTickCount === 0 || month === "01" || snapshot.date.slice(0, 4) !== firstYear;
+
+    monthTickCount += 1;
+
+    ticks.set(snapshot.date, {
+      date: snapshot.date,
+      label: getMonthTickLabel(snapshot.date, includeYear),
+      position: (index / maxIndex) * 100,
+      selected: false,
+    });
+  });
+
+  const selectedSnapshot = snapshots[selectedIndex];
+
+  if (selectedSnapshot) {
+    ticks.set(selectedSnapshot.date, {
+      date: selectedSnapshot.date,
+      label: getCompactSnapshotLabel(selectedSnapshot.date, true),
+      position: (selectedIndex / maxIndex) * 100,
+      selected: true,
+    });
+  }
+
+  return Array.from(ticks.values()).sort((left, right) => left.position - right.position);
+}
+
+function providerLabel(snapshot?: TrendSnapshot) {
+  if (isYearSeedSnapshot(snapshot)) {
+    return "Generated seed";
+  }
+
+  if (snapshot?.provider === "openai") {
+    return "OpenAI";
+  }
+
+  return snapshot?.degraded ? "Local fallback" : "Local extraction";
+}
+
+function isYearSeedSnapshot(snapshot?: TrendSnapshot) {
+  return Boolean(snapshot?.requestId.startsWith("year-seed-"));
 }

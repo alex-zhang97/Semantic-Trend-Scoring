@@ -474,22 +474,6 @@ function PillarInspector({
         )}
       </div>
 
-      <div className="request-meta">
-        <div>
-          <span>Provider</span>
-          <strong>{providerLabel(snapshot)}</strong>
-        </div>
-        <div>
-          <span>Request</span>
-          <strong>{snapshot?.requestId ?? "pending"}</strong>
-        </div>
-        <div>
-          <span>Usage</span>
-          <strong>
-            {snapshot?.usage ? `${snapshot.usage.totalTokens.toLocaleString()} tokens` : "N/A"}
-          </strong>
-        </div>
-      </div>
     </>
   );
 }
@@ -837,18 +821,6 @@ function clamp(value: number, min: number, max: number) {
   }
 
   return Math.min(max, Math.max(min, value));
-}
-
-function providerLabel(snapshot?: TrendSnapshot) {
-  if (isYearSeedSnapshot(snapshot)) {
-    return "Generated seed";
-  }
-
-  if (snapshot?.provider === "openai") {
-    return "OpenAI";
-  }
-
-  return snapshot?.degraded ? "Local fallback" : "Local extraction";
 }
 
 function isYearSeedSnapshot(snapshot?: TrendSnapshot) {

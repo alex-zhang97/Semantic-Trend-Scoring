@@ -771,47 +771,13 @@ button {
   line-height: 1.45;
 }
 
-.request-meta {
-  display: grid;
-  flex-shrink: 0;
-  grid-template-columns: 1fr;
-  gap: 8px;
-  margin-top: 12px;
-  border-top: 1px solid var(--border);
-  padding-top: 14px;
-}
-
-.request-meta div {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.request-meta span {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 680;
-  text-transform: uppercase;
-}
-
-.request-meta strong {
-  max-width: 210px;
-  overflow: hidden;
-  color: #24312f;
-  font-size: 12px;
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .chatbot-card {
   display: grid;
   flex: 0 0 auto;
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 8px;
   margin-top: 12px;
-  height: clamp(152px, 19vh, 184px);
+  height: clamp(208px, 26vh, 280px);
   min-width: 0;
   overflow: hidden;
   border: 1px solid #dbe6e3;
